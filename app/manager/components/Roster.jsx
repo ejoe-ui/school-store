@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { decimalToHexUid } from '../../../lib/nfc'
+import { searchStudents } from '../../../lib/students'
 
 const GREEN = '#006938'
 
@@ -13,6 +14,70 @@ export default function Roster({ employees, onChange }) {
   const [editingId, setEditingId] = useState(null)
   const [editNfcInput, setEditNfcInput] = useState('')
   const [editError, setEditError] = useState('')
+
+  // ── Student link (add form) ──────────────────────────────────────────
+  const [studentQuery, setStudentQuery] = useState('')
+  const [studentResults, setStudentResults] = useState([])
+  const [selectedStudent, setSelectedStudent] = useState(null)
+
+  async function handleStudentSearch(q) {
+    setStudentQuery(q)
+    setSelectedStudent(null)
+    if (q.trim().length < 2) { setStudentResults([]); return }
+    const results = await searchStudents(q)
+    setStudentResults(results)
+  }
+
+  function pickStudent(s) {
+    setSelectedStudent(s)
+    setStudentQuery(s.full_name)
+    setStudentResults([])
+  }
+
+  // ── Student link (inline edit on existing rows) ──────────────────────
+  const [editingStudentId, setEditingStudentId] = useState(null)
+  const [editStudentQuery, setEditStudentQuery] = useState('')
+  const [editStudentResults, setEditStudentResults] = useState([])
+  const [editSelectedStudent, setEditSelectedStudent] = useState(null)
+  const [editStudentError, setEditStudentError] = useState('')
+
+  function startEditStudent(emp) {
+    setEditingStudentId(emp.id)
+    setEditStudentQuery(emp.students?.full_name || '')
+    setEditStudentResults([])
+    setEditSelectedStudent(emp.students || null)
+    setEditStudentError('')
+  }
+
+  async function handleEditStudentSearch(q) {
+    setEditStudentQuery(q)
+    setEditSelectedStudent(null)
+    if (q.trim().length < 2) { setEditStudentResults([]); return }
+    const results = await searchStudents(q)
+    setEditStudentResults(results)
+  }
+
+  function pickEditStudent(s) {
+    setEditSelectedStudent(s)
+    setEditStudentQuery(s.full_name)
+    setEditStudentResults([])
+  }
+
+  async function saveStudentLink(emp) {
+    setEditStudentError('')
+    const { error: updateErr } = await supabase
+      .from('store_employees')
+      .update({ student_id: editSelectedStudent?.id || null })
+      .eq('id', emp.id)
+    if (updateErr) { setEditStudentError(updateErr.message); return }
+    setEditingStudentId(null)
+    onChange()
+  }
+
+  function unlinkStudent() {
+    setEditSelectedStudent(null)
+    setEditStudentQuery('')
+  }
 
   async function addEmployee(e) {
     e.preventDefault()
@@ -36,11 +101,15 @@ export default function Roster({ employees, onChange }) {
       name: form.name.trim(),
       email: form.email.trim() || null,
       nfc_uid: nfcUid,
+      student_id: selectedStudent?.id || null,
       active: true,
     })
     setSaving(false)
     if (insertErr) { setError(insertErr.message); return }
     setForm({ name: '', email: '', nfcInput: '' })
+    setStudentQuery('')
+    setSelectedStudent(null)
+    setStudentResults([])
     onChange()
   }
 
@@ -97,6 +166,30 @@ export default function Roster({ employees, onChange }) {
             placeholder="Scan or type the ID" autoComplete="off"
             style={{ display: 'block', marginTop: 4, padding: 8, borderRadius: 8, border: '1px solid #d1d5db', minWidth: 160 }} />
         </label>
+        <label style={{ fontSize: 12, color: '#6b7280', position: 'relative' }}>
+          Link to student (optional)
+          <input type="text" value={studentQuery} onChange={e => handleStudentSearch(e.target.value)}
+            placeholder="Search by name" autoComplete="off"
+            style={{ display: 'block', marginTop: 4, padding: 8, borderRadius: 8, border: selectedStudent ? `1px solid ${GREEN}` : '1px solid #d1d5db', minWidth: 180 }} />
+          {studentResults.length > 0 && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, marginTop: 2,
+              background: 'white', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              maxHeight: 180, overflowY: 'auto',
+            }}>
+              {studentResults.map(s => (
+                <div key={s.id} onClick={() => pickStudent(s)} style={{
+                  padding: '8px 10px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
+                }}>
+                  {s.full_name}
+                </div>
+              ))}
+            </div>
+          )}
+          {selectedStudent && (
+            <div style={{ fontSize: 11, color: GREEN, marginTop: 4 }}>✓ Linked to {selectedStudent.full_name}</div>
+          )}
+        </label>
         <button type="submit" disabled={saving || !form.name.trim()} style={{
           padding: '9px 16px', borderRadius: 8, border: 'none', background: GREEN, color: 'white',
           fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: !form.name.trim() ? 0.5 : 1,
@@ -113,13 +206,14 @@ export default function Roster({ employees, onChange }) {
               <th style={{ padding: '10px 14px' }}>Name</th>
               <th style={{ padding: '10px 14px' }}>Email</th>
               <th style={{ padding: '10px 14px' }}>NFC card</th>
+              <th style={{ padding: '10px 14px' }}>Student photo link</th>
               <th style={{ padding: '10px 14px' }}>Status</th>
               <th style={{ padding: '10px 14px' }}></th>
             </tr>
           </thead>
           <tbody>
             {employees.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
+              <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
             )}
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
@@ -147,6 +241,56 @@ export default function Roster({ employees, onChange }) {
                       <button onClick={() => startEditNfc(emp)} style={{
                         marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       }}>{emp.nfc_uid ? 'Replace' : 'Assign'}</button>
+                    </span>
+                  )}
+                </td>
+                <td style={{ padding: '10px 14px', position: 'relative' }}>
+                  {editingStudentId === emp.id ? (
+                    <div>
+                      <input type="text" autoFocus value={editStudentQuery} onChange={e => handleEditStudentSearch(e.target.value)}
+                        placeholder="Search by name" autoComplete="off"
+                        style={{ padding: 6, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, width: 170 }} />
+                      {editStudentResults.length > 0 && (
+                        <div style={{
+                          position: 'absolute', zIndex: 10, marginTop: 2,
+                          background: 'white', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                          maxHeight: 160, overflowY: 'auto', width: 200,
+                        }}>
+                          {editStudentResults.map(s => (
+                            <div key={s.id} onClick={() => pickEditStudent(s)} style={{
+                              padding: '8px 10px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
+                            }}>
+                              {s.full_name}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ marginTop: 6 }}>
+                        <button onClick={() => saveStudentLink(emp)} style={{
+                          padding: '6px 10px', borderRadius: 6, border: 'none', background: GREEN,
+                          color: 'white', fontSize: 12, cursor: 'pointer',
+                        }}>Save</button>
+                        <button onClick={() => setEditingStudentId(null)} style={{
+                          marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
+                          color: '#6b7280', fontSize: 12, cursor: 'pointer',
+                        }}>Cancel</button>
+                        {editSelectedStudent && (
+                          <button onClick={unlinkStudent} style={{
+                            marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
+                            color: '#991b1b', fontSize: 12, cursor: 'pointer',
+                          }}>Unlink</button>
+                        )}
+                      </div>
+                      {editStudentError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editStudentError}</div>}
+                    </div>
+                  ) : (
+                    <span>
+                      {emp.students?.full_name
+                        ? <span style={{ color: GREEN, fontWeight: 600 }}>{emp.students.full_name}</span>
+                        : <span style={{ color: '#c1c9d2' }}>Not linked</span>}
+                      <button onClick={() => startEditStudent(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>{emp.students?.full_name ? 'Change' : 'Link'}</button>
                     </span>
                   )}
                 </td>
