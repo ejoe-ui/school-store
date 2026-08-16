@@ -27,7 +27,7 @@ export default function Kiosk() {
   const [loading, setLoading] = useState(true)
   const flashTimer = useRef(null)
 
-  // ── Clock ──────────────────────────────────────────────────────────────
+  // ── Clock ──────────────────────────────────────────────────────────
   useEffect(() => {
     setNow(new Date())
     const id = setInterval(() => setNow(new Date()), 1000)
@@ -35,13 +35,28 @@ export default function Kiosk() {
   }, [])
 
   // ── Load employees + open shifts + today's schedule ─────────────────────
+  // students.id is not unique on its own (composite PK with period), so we
+  // can't rely on a PostgREST embedded FK relationship — fetch and merge
+  // manually instead.
+  const attachStudents = useCallback(async (emps) => {
+    const ids = [...new Set((emps || []).map(e => e.student_id).filter(Boolean))]
+    if (!ids.length) return (emps || []).map(e => ({ ...e, students: null }))
+    const { data: studs } = await supabase
+      .from('students')
+      .select('id, full_name, photo_file')
+      .in('id', ids)
+    const byId = {}
+    ;(studs || []).forEach(s => { if (!byId[s.id]) byId[s.id] = s })
+    return (emps || []).map(e => ({ ...e, students: e.student_id ? byId[e.student_id] || null : null }))
+  }, [])
+
   const loadEmployees = useCallback(async () => {
     const { data } = await supabase
       .from('store_employees')
-      .select('*, students(id, full_name, photo_file)')
+      .select('*')
       .eq('active', true).order('name')
-    setEmployees(data || [])
-  }, [])
+    setEmployees(await attachStudents(data))
+  }, [attachStudents])
 
   const loadOpenShifts = useCallback(async () => {
     const { data } = await supabase
@@ -97,16 +112,17 @@ export default function Kiosk() {
   const loadAll = useCallback(async () => {
     const { data: emps } = await supabase
       .from('store_employees')
-      .select('*, students(id, full_name, photo_file)')
+      .select('*')
       .eq('active', true).order('name')
-    setEmployees(emps || [])
-    await Promise.all([loadOpenShifts(), loadTodaySchedule(emps)])
+    const merged = await attachStudents(emps)
+    setEmployees(merged)
+    await Promise.all([loadOpenShifts(), loadTodaySchedule(merged)])
     setLoading(false)
-  }, [loadOpenShifts, loadTodaySchedule])
+  }, [loadOpenShifts, loadTodaySchedule, attachStudents])
 
   useEffect(() => { loadAll() }, [loadAll])
 
-  // ── Flash helper ──────────────────────────────────────────────────────
+  // ── Flash helper ──────────────────────────────────────────────────
   const showFlash = useCallback((flashObj, duration = 3000) => {
     clearTimeout(flashTimer.current)
     setFlash(flashObj)
