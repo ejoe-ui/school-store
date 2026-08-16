@@ -24,7 +24,10 @@ export default function ManagerPage() {
   const [employees, setEmployees] = useState([])
 
   const loadEmployees = useCallback(async () => {
-    const { data } = await supabase.from('store_employees').select('*').order('name')
+    const { data } = await supabase
+      .from('store_employees')
+      .select('*, students(id, full_name, photo_file)')
+      .order('name')
     setEmployees(data || [])
   }, [])
 
