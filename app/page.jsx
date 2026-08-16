@@ -37,7 +37,9 @@ export default function Kiosk() {
   // ── Load employees + open shifts + today's schedule ─────────────────────
   const loadEmployees = useCallback(async () => {
     const { data } = await supabase
-      .from('store_employees').select('*').eq('active', true).order('name')
+      .from('store_employees')
+      .select('*, students(id, full_name, photo_file)')
+      .eq('active', true).order('name')
     setEmployees(data || [])
   }, [])
 
@@ -94,7 +96,9 @@ export default function Kiosk() {
 
   const loadAll = useCallback(async () => {
     const { data: emps } = await supabase
-      .from('store_employees').select('*').eq('active', true).order('name')
+      .from('store_employees')
+      .select('*, students(id, full_name, photo_file)')
+      .eq('active', true).order('name')
     setEmployees(emps || [])
     await Promise.all([loadOpenShifts(), loadTodaySchedule(emps)])
     setLoading(false)
@@ -114,8 +118,9 @@ export default function Kiosk() {
     const openShift = openShifts[employee.id]
 
     let photoUrl = null
-    if (employee.photo_file) {
-      const { data } = await supabase.storage.from('lifetouch-raw').createSignedUrl(employee.photo_file, 300)
+    const linkedPhoto = employee.students?.photo_file
+    if (linkedPhoto) {
+      const { data } = await supabase.storage.from('student-photos').createSignedUrl(linkedPhoto, 300)
       if (data?.signedUrl) photoUrl = data.signedUrl
     }
 
