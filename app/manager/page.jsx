@@ -23,12 +23,24 @@ export default function ManagerPage() {
   const [tab, setTab] = useState('approvals')
   const [employees, setEmployees] = useState([])
 
+  // students.id is not unique on its own (composite PK with period), so we
+  // can't rely on a PostgREST embedded FK relationship — fetch and merge
+  // manually instead.
   const loadEmployees = useCallback(async () => {
-    const { data } = await supabase
+    const { data: emps } = await supabase
       .from('store_employees')
-      .select('*, students(id, full_name, photo_file)')
+      .select('*')
       .order('name')
-    setEmployees(data || [])
+    const ids = [...new Set((emps || []).map(e => e.student_id).filter(Boolean))]
+    let byId = {}
+    if (ids.length) {
+      const { data: studs } = await supabase
+        .from('students')
+        .select('id, full_name, photo_file')
+        .in('id', ids)
+      ;(studs || []).forEach(s => { if (!byId[s.id]) byId[s.id] = s })
+    }
+    setEmployees((emps || []).map(e => ({ ...e, students: e.student_id ? byId[e.student_id] || null : null })))
   }, [])
 
   useEffect(() => { if (unlocked) loadEmployees() }, [unlocked, loadEmployees])
