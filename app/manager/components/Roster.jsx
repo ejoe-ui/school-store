@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { decimalToHexUid } from '../../../lib/nfc'
 import { searchStudents } from '../../../lib/students'
+import QRCode from 'qrcode'
 
 const GREEN = '#006938'
 
@@ -15,7 +16,10 @@ export default function Roster({ employees, onChange }) {
   const [editNfcInput, setEditNfcInput] = useState('')
   const [editError, setEditError] = useState('')
 
-  // ── Student link (add form) ──────────────────────────────────────────
+  const [qrEmployee, setQrEmployee] = useState(null)
+  const [qrDataUrl, setQrDataUrl] = useState('')
+
+  // ââ Student link (add form) ââââââââââââââââââââââââââââââââââââââââââ
   const [studentQuery, setStudentQuery] = useState('')
   const [studentResults, setStudentResults] = useState([])
   const [selectedStudent, setSelectedStudent] = useState(null)
@@ -34,7 +38,7 @@ export default function Roster({ employees, onChange }) {
     setStudentResults([])
   }
 
-  // ── Student link (inline edit on existing rows) ──────────────────────
+  // ââ Student link (inline edit on existing rows) ââââââââââââââââââââââ
   const [editingStudentId, setEditingStudentId] = useState(null)
   const [editStudentQuery, setEditStudentQuery] = useState('')
   const [editStudentResults, setEditStudentResults] = useState([])
@@ -118,6 +122,20 @@ export default function Roster({ employees, onChange }) {
     onChange()
   }
 
+  // QR badges just encode the employee's id â the kiosk's QR scanner looks
+  // it straight back up via resolveEmployeeById, no extra token needed.
+  async function showQr(emp) {
+    const url = await QRCode.toDataURL(emp.id, { width: 260, margin: 1 })
+    setQrDataUrl(url)
+    setQrEmployee(emp)
+  }
+
+  async function resetPin(emp) {
+    if (!confirm(`Reset ${emp.name}'s PIN? They'll be asked to choose a new one next time they clock in or out.`)) return
+    await supabase.from('store_employees').update({ pin: null }).eq('id', emp.id)
+    onChange()
+  }
+
   function startEditNfc(emp) {
     setEditingId(emp.id)
     setEditNfcInput('')
@@ -187,16 +205,16 @@ export default function Roster({ employees, onChange }) {
             </div>
           )}
           {selectedStudent && (
-            <div style={{ fontSize: 11, color: GREEN, marginTop: 4 }}>✓ Linked to {selectedStudent.full_name}</div>
+            <div style={{ fontSize: 11, color: GREEN, marginTop: 4 }}>â Linked to {selectedStudent.full_name}</div>
           )}
         </label>
         <button type="submit" disabled={saving || !form.name.trim()} style={{
           padding: '9px 16px', borderRadius: 8, border: 'none', background: GREEN, color: 'white',
           fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: !form.name.trim() ? 0.5 : 1,
         }}>
-          {saving ? 'Adding…' : '+ Add employee'}
+          {saving ? 'Addingâ¦' : '+ Add employee'}
         </button>
-        {error && <p style={{ width: '100%', color: '#991b1b', fontSize: 13, margin: '4px 0 0' }}>⚠️ {error}</p>}
+        {error && <p style={{ width: '100%', color: '#991b1b', fontSize: 13, margin: '4px 0 0' }}>â ï¸ {error}</p>}
       </form>
 
       <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
@@ -207,18 +225,20 @@ export default function Roster({ employees, onChange }) {
               <th style={{ padding: '10px 14px' }}>Email</th>
               <th style={{ padding: '10px 14px' }}>NFC card</th>
               <th style={{ padding: '10px 14px' }}>Student photo link</th>
+              <th style={{ padding: '10px 14px' }}>PIN</th>
+              <th style={{ padding: '10px 14px' }}>QR badge</th>
               <th style={{ padding: '10px 14px' }}>Status</th>
               <th style={{ padding: '10px 14px' }}></th>
             </tr>
           </thead>
           <tbody>
             {employees.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
+              <tr><td colSpan={8} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
             )}
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{emp.name}</td>
-                <td style={{ padding: '10px 14px', color: '#6b7280' }}>{emp.email || '—'}</td>
+                <td style={{ padding: '10px 14px', color: '#6b7280' }}>{emp.email || 'â'}</td>
                 <td style={{ padding: '10px 14px' }}>
                   {editingId === emp.id ? (
                     <div>
@@ -233,7 +253,7 @@ export default function Roster({ employees, onChange }) {
                         marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
                         color: '#6b7280', fontSize: 12, cursor: 'pointer',
                       }}>Cancel</button>
-                      {editError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editError}</div>}
+                      {editError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>â ï¸ {editError}</div>}
                     </div>
                   ) : (
                     <span>
@@ -281,7 +301,7 @@ export default function Roster({ employees, onChange }) {
                           }}>Unlink</button>
                         )}
                       </div>
-                      {editStudentError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editStudentError}</div>}
+                      {editStudentError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>â ï¸ {editStudentError}</div>}
                     </div>
                   ) : (
                     <span>
@@ -293,6 +313,24 @@ export default function Roster({ employees, onChange }) {
                       }}>{emp.students?.full_name ? 'Change' : 'Link'}</button>
                     </span>
                   )}
+                </td>
+                <td style={{ padding: '10px 14px' }}>
+                  {emp.pin ? (
+                    <span>
+                      <span style={{ color: GREEN, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em' }}>ââââ</span>
+                      <button onClick={() => resetPin(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: '#991b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>Reset</button>
+                    </span>
+                  ) : (
+                    <span style={{ color: '#c1c9d2', fontSize: 12 }}>Not set yet</span>
+                  )}
+                </td>
+                <td style={{ padding: '10px 14px' }}>
+                  <button onClick={() => showQr(emp)} style={{
+                    border: '1px solid #d1d5db', background: 'white', borderRadius: 6, padding: '5px 10px',
+                    color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>Show / print</button>
                 </td>
                 <td style={{ padding: '10px 14px' }}>
                   <span style={{
@@ -315,6 +353,32 @@ export default function Roster({ employees, onChange }) {
           </tbody>
         </table>
       </div>
+
+      {qrEmployee && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 50,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 28, textAlign: 'center', width: 320 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{qrEmployee.name}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>School Store QR Badge</div>
+            {qrDataUrl && <img src={qrDataUrl} alt="QR code" style={{ width: 220, height: 220 }} />}
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
+              Print and laminate, or have them save it to their phone as a backup if they forget their card.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 18 }}>
+              <button onClick={() => window.print()} style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', background: GREEN, color: 'white',
+                fontWeight: 600, cursor: 'pointer',
+              }}>Print</button>
+              <button onClick={() => setQrEmployee(null)} style={{
+                padding: '8px 16px', borderRadius: 8, border: '1px solid #d1d5db', background: 'white',
+                color: '#6b7280', cursor: 'pointer',
+              }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
