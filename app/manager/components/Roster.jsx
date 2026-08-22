@@ -19,7 +19,7 @@ export default function Roster({ employees, onChange }) {
   const [qrEmployee, setQrEmployee] = useState(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
 
-  // ââ Student link (add form) ââââââââââââââââââââââââââââââââââââââââââ
+  // ── Student link (add form) ──────────────────────────────────────────
   const [studentQuery, setStudentQuery] = useState('')
   const [studentResults, setStudentResults] = useState([])
   const [selectedStudent, setSelectedStudent] = useState(null)
@@ -38,7 +38,7 @@ export default function Roster({ employees, onChange }) {
     setStudentResults([])
   }
 
-  // ââ Student link (inline edit on existing rows) ââââââââââââââââââââââ
+  // ── Student link (inline edit on existing rows) ──────────────────────
   const [editingStudentId, setEditingStudentId] = useState(null)
   const [editStudentQuery, setEditStudentQuery] = useState('')
   const [editStudentResults, setEditStudentResults] = useState([])
@@ -122,7 +122,7 @@ export default function Roster({ employees, onChange }) {
     onChange()
   }
 
-  // QR badges just encode the employee's id â the kiosk's QR scanner looks
+  // QR badges just encode the employee's id — the kiosk's QR scanner looks
   // it straight back up via resolveEmployeeById, no extra token needed.
   async function showQr(emp) {
     const url = await QRCode.toDataURL(emp.id, { width: 260, margin: 1 })
@@ -205,16 +205,16 @@ export default function Roster({ employees, onChange }) {
             </div>
           )}
           {selectedStudent && (
-            <div style={{ fontSize: 11, color: GREEN, marginTop: 4 }}>â Linked to {selectedStudent.full_name}</div>
+            <div style={{ fontSize: 11, color: GREEN, marginTop: 4 }}>✓ Linked to {selectedStudent.full_name}</div>
           )}
         </label>
         <button type="submit" disabled={saving || !form.name.trim()} style={{
           padding: '9px 16px', borderRadius: 8, border: 'none', background: GREEN, color: 'white',
           fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: !form.name.trim() ? 0.5 : 1,
         }}>
-          {saving ? 'Addingâ¦' : '+ Add employee'}
+          {saving ? 'Adding…' : '+ Add employee'}
         </button>
-        {error && <p style={{ width: '100%', color: '#991b1b', fontSize: 13, margin: '4px 0 0' }}>â ï¸ {error}</p>}
+        {error && <p style={{ width: '100%', color: '#991b1b', fontSize: 13, margin: '4px 0 0' }}>⚠️ {error}</p>}
       </form>
 
       <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
@@ -238,7 +238,7 @@ export default function Roster({ employees, onChange }) {
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{emp.name}</td>
-                <td style={{ padding: '10px 14px', color: '#6b7280' }}>{emp.email || 'â'}</td>
+                <td style={{ padding: '10px 14px', color: '#6b7280' }}>{emp.email || '—'}</td>
                 <td style={{ padding: '10px 14px' }}>
                   {editingId === emp.id ? (
                     <div>
@@ -253,7 +253,7 @@ export default function Roster({ employees, onChange }) {
                         marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
                         color: '#6b7280', fontSize: 12, cursor: 'pointer',
                       }}>Cancel</button>
-                      {editError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>â ï¸ {editError}</div>}
+                      {editError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editError}</div>}
                     </div>
                   ) : (
                     <span>
@@ -301,7 +301,7 @@ export default function Roster({ employees, onChange }) {
                           }}>Unlink</button>
                         )}
                       </div>
-                      {editStudentError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>â ï¸ {editStudentError}</div>}
+                      {editStudentError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editStudentError}</div>}
                     </div>
                   ) : (
                     <span>
@@ -317,7 +317,7 @@ export default function Roster({ employees, onChange }) {
                 <td style={{ padding: '10px 14px' }}>
                   {emp.pin ? (
                     <span>
-                      <span style={{ color: GREEN, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em' }}>ââââ</span>
+                      <span style={{ color: GREEN, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em' }}>●●●●</span>
                       <button onClick={() => resetPin(emp)} style={{
                         marginLeft: 8, border: 'none', background: 'none', color: '#991b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       }}>Reset</button>
