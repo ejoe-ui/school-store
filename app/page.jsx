@@ -1,9 +1,11 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { resolveEmployee } from '../lib/nfc'
+import { resolveEmployee, resolveEmployeeById } from '../lib/nfc'
 import { fmtDuration, fmtTime, fmtDateLong, minutesBetween, DAY_NAMES } from '../lib/time'
 import NfcListener from '../components/NfcListener'
+import PinPad from '../components/PinPad'
+import QrScanner from '../components/QrScanner'
 
 const GREEN = '#006938'
 const DARK  = '#0b1f16'
@@ -26,6 +28,20 @@ export default function Kiosk() {
   const [flash, setFlash] = useState(null)             // { kind: 'welcome'|'bye'|'error', text, sub, photoUrl }
   const [loading, setLoading] = useState(true)
   const flashTimer = useRef(null)
+
+  // ── PIN gate + QR scan state ──────────────────────────────────────────
+  // A tap (tile, NFC, or QR) never punches directly anymore — it opens the
+  // PIN pad first. This closes both the "hand a friend your badge" gap and
+  // the "just tap someone else's tile on screen" gap, since every punch now
+  // needs something the employee has (badge/QR) AND something only they
+  // know (PIN).
+  const [pendingEmployee, setPendingEmployee] = useState(null)
+  const [pinMode, setPinMode] = useState(null)   // 'verify' | 'set-first' | 'set-confirm'
+  const [pinError, setPinError] = useState('')
+  const [pinBusy, setPinBusy] = useState(false)
+  const [attempts, setAttempts] = useState(0)
+  const [firstPin, setFirstPin] = useState('')
+  const [showQr, setShowQr] = useState(false)
 
   // ── Clock ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -122,6 +138,14 @@ export default function Kiosk() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  // If a scan resolves an employee without the student-photo join (NFC/QR
+  // lookups query store_employees alone), prefer the already-merged copy
+  // from `employees` so the confirmation screen can still show their photo.
+  const enrich = useCallback((employee) => {
+    if (!employee) return employee
+    return employees.find(e => e.id === employee.id) || employee
+  }, [employees])
+
   // ── Flash helper ──────────────────────────────────────────────────
   const showFlash = useCallback((flashObj, duration = 3000) => {
     clearTimeout(flashTimer.current)
@@ -129,7 +153,7 @@ export default function Kiosk() {
     flashTimer.current = setTimeout(() => setFlash(null), duration)
   }, [])
 
-  // ── Punch logic (shared by tile tap + NFC scan) ──────────────────────────
+  // ── Punch logic (only ever called after a PIN has been verified) ────────
   const punch = useCallback(async (employee) => {
     const openShift = openShifts[employee.id]
 
@@ -170,6 +194,68 @@ export default function Kiosk() {
     loadOpenShifts()
   }, [openShifts, showFlash, loadOpenShifts])
 
+  // ── PIN gate ────────────────────────────────────────────────────────────
+  const closePunch = useCallback(() => {
+    setPendingEmployee(null)
+    setPinMode(null)
+    setPinError('')
+    setPinBusy(false)
+    setAttempts(0)
+    setFirstPin('')
+  }, [])
+
+  const beginPunch = useCallback((employee) => {
+    if (!employee) return
+    setPinError('')
+    setAttempts(0)
+    setFirstPin('')
+    setPendingEmployee(employee)
+    setPinMode(employee.pin ? 'verify' : 'set-first')
+  }, [])
+
+  const handlePinComplete = useCallback(async (digits) => {
+    if (!pendingEmployee) return
+
+    if (pinMode === 'verify') {
+      if (digits === pendingEmployee.pin) {
+        setPinBusy(true)
+        await punch(pendingEmployee)
+        closePunch()
+        return
+      }
+      const next = attempts + 1
+      if (next >= 3) {
+        showFlash({ kind: 'error', text: 'Too many tries', sub: 'Ask a manager for help with your PIN' }, 3500)
+        closePunch()
+        return
+      }
+      setAttempts(next)
+      setPinError('Wrong PIN — try again')
+      return
+    }
+
+    if (pinMode === 'set-first') {
+      setFirstPin(digits)
+      setPinError('')
+      setPinMode('set-confirm')
+      return
+    }
+
+    if (pinMode === 'set-confirm') {
+      if (digits !== firstPin) {
+        setPinError('Didn’t match — start over')
+        setFirstPin('')
+        setPinMode('set-first')
+        return
+      }
+      setPinBusy(true)
+      await supabase.from('store_employees').update({ pin: digits }).eq('id', pendingEmployee.id)
+      await punch({ ...pendingEmployee, pin: digits })
+      loadEmployees()
+      closePunch()
+    }
+  }, [pendingEmployee, pinMode, attempts, firstPin, punch, showFlash, closePunch, loadEmployees])
+
   // ── NFC scan handler ──────────────────────────────────────────────────
   const handleScan = useCallback(async (rawUid) => {
     const employee = await resolveEmployee(rawUid)
@@ -177,15 +263,38 @@ export default function Kiosk() {
       showFlash({ kind: 'error', text: 'Card not recognized', sub: 'Not registered in the punch clock roster' }, 3500)
       return
     }
-    punch(employee)
-  }, [punch, showFlash])
+    beginPunch(enrich(employee))
+  }, [beginPunch, enrich, showFlash])
+
+  // ── QR scan handler ─────────────────────────────────────────────────────
+  const handleQrScan = useCallback(async (code) => {
+    setShowQr(false)
+    const employee = await resolveEmployeeById(code)
+    if (!employee) {
+      showFlash({ kind: 'error', text: 'QR not recognized', sub: 'Not registered in the punch clock roster' }, 3500)
+      return
+    }
+    beginPunch(enrich(employee))
+  }, [beginPunch, enrich, showFlash])
+
+  const pinTitle = pinMode === 'verify'
+    ? `Enter your PIN — ${pendingEmployee?.name?.split(' ')[0] || ''}`
+    : pinMode === 'set-confirm'
+      ? 'Confirm your new PIN'
+      : `Choose a PIN — ${pendingEmployee?.name?.split(' ')[0] || ''}`
+
+  const pinSubtitle = pinMode === 'verify'
+    ? 'Ask a manager to reset it if you forgot.'
+    : pinMode === 'set-confirm'
+      ? 'Enter the same 4 digits again to confirm.'
+      : 'Pick 4 digits nobody else knows. You’ll use it every time you clock in or out.'
 
   return (
     <div style={{
       minHeight: '100vh', background: DARK, color: 'white',
       display: 'flex', flexDirection: 'column', padding: 24, boxSizing: 'border-box',
     }}>
-      <NfcListener onScan={handleScan} disabled={!!flash} />
+      <NfcListener onScan={handleScan} disabled={!!flash || !!pendingEmployee || showQr} />
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
@@ -207,7 +316,7 @@ export default function Kiosk() {
         {/* ── Tap tiles ── */}
         <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 13, color: '#8fae9c', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Tap your card, or tap your name
+            Tap your card, or tap your name — you'll enter your PIN next
           </div>
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
@@ -222,7 +331,7 @@ export default function Kiosk() {
               return (
                 <button
                   key={emp.id}
-                  onClick={() => punch(emp)}
+                  onClick={() => beginPunch(emp)}
                   style={{
                     background: shift ? '#0e3524' : '#122a1f',
                     border: `1px solid ${shift ? GREEN : '#1e3a2c'}`,
@@ -248,6 +357,13 @@ export default function Kiosk() {
               )
             })}
           </div>
+          <button onClick={() => setShowQr(true)} style={{
+            marginTop: 14, alignSelf: 'flex-start', padding: '10px 16px', borderRadius: 10,
+            border: '1px solid #274a37', background: '#122a1f', color: '#8fae9c',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}>
+            📷 Don't have your card? Scan your QR badge
+          </button>
         </div>
 
         {/* ── Today's schedule ── */}
@@ -273,6 +389,24 @@ export default function Kiosk() {
           </div>
         </div>
       </div>
+
+      {/* ── PIN pad overlay ── */}
+      {pendingEmployee && pinMode && (
+        <PinPad
+          key={pinMode + attempts}
+          title={pinTitle}
+          subtitle={pinSubtitle}
+          error={pinError}
+          busy={pinBusy}
+          onCancel={closePunch}
+          onComplete={handlePinComplete}
+        />
+      )}
+
+      {/* ── QR scanner overlay ── */}
+      {showQr && (
+        <QrScanner onScan={handleQrScan} onCancel={() => setShowQr(false)} />
+      )}
 
       {/* ── Full-screen confirmation flash ── */}
       {flash && (
