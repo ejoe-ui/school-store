@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 const GREEN = '#006938'
 
 // Full-screen numeric keypad used by the kiosk to verify or set an
-// employee's PIN before a punch is recorded. Purely presentational â
+// employee's PIN before a punch is recorded. Purely presentational —
 // buffers digits itself and calls onComplete once `length` digits are in.
 export default function PinPad({ length = 4, title, subtitle, error, busy, onComplete, onCancel }) {
   const [digits, setDigits] = useState('')
@@ -50,7 +50,7 @@ export default function PinPad({ length = 4, title, subtitle, error, busy, onCom
       </div>
 
       {error && <div style={{ color: '#f87171', fontSize: 14, fontWeight: 600, marginTop: -6 }}>{error}</div>}
-      {busy && <div style={{ color: '#8fae9c', fontSize: 13, marginTop: -6 }}>Workingâ¦</div>}
+      {busy && <div style={{ color: '#8fae9c', fontSize: 13, marginTop: -6 }}>Working…</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 76px)', gap: 12 }}>
         {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
@@ -58,7 +58,7 @@ export default function PinPad({ length = 4, title, subtitle, error, busy, onCom
         ))}
         <button onClick={onCancel} disabled={busy} style={{ ...keyStyle, fontSize: 13, color: '#8fae9c' }}>Cancel</button>
         <button onClick={() => press('0')} disabled={busy} style={keyStyle}>0</button>
-        <button onClick={backspace} disabled={busy} style={keyStyle}>â«</button>
+        <button onClick={backspace} disabled={busy} style={keyStyle}>⌫</button>
       </div>
     </div>
   )
