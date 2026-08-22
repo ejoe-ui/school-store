@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 
 // Full-screen camera scanner for the QR-badge fallback punch path. Uses the
-// iPad's built-in camera â no extra hardware. Scans frames with jsQR until
+// iPad's built-in camera — no extra hardware. Scans frames with jsQR until
 // it finds a code, then hands the decoded text (an employee id) to onScan.
 export default function QrScanner({ onScan, onCancel }) {
   const videoRef = useRef(null)
