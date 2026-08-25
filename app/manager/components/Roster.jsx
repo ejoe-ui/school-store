@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { decimalToHexUid } from '../../../lib/nfc'
 import { searchStudents } from '../../../lib/students'
@@ -18,6 +18,113 @@ export default function Roster({ employees, onChange }) {
 
   const [qrEmployee, setQrEmployee] = useState(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
+
+  // ── Email (inline edit on existing rows) ──────────────────────────────
+  const [editingEmailId, setEditingEmailId] = useState(null)
+  const [editEmailInput, setEditEmailInput] = useState('')
+  const [editEmailError, setEditEmailError] = useState('')
+
+  function startEditEmail(emp) {
+    setEditingEmailId(emp.id)
+    setEditEmailInput(emp.email || '')
+    setEditEmailError('')
+  }
+
+  async function saveEmail(emp) {
+    setEditEmailError('')
+    const value = editEmailInput.trim()
+    const { error: updateErr } = await supabase
+      .from('store_employees')
+      .update({ email: value || null })
+      .eq('id', emp.id)
+    if (updateErr) { setEditEmailError(updateErr.message); return }
+    setEditingEmailId(null)
+    onChange()
+  }
+
+  // ── PIN (manager can set directly, in addition to Reset) ──────────────
+  const [editingPinId, setEditingPinId] = useState(null)
+  const [editPinInput, setEditPinInput] = useState('')
+  const [editPinError, setEditPinError] = useState('')
+
+  function startEditPin(emp) {
+    setEditingPinId(emp.id)
+    setEditPinInput('')
+    setEditPinError('')
+  }
+
+  async function savePin(emp) {
+    setEditPinError('')
+    const digits = editPinInput.trim()
+    if (!/^\d{4}$/.test(digits)) { setEditPinError('PIN must be exactly 4 digits.'); return }
+    const { error: updateErr } = await supabase
+      .from('store_employees')
+      .update({ pin: digits })
+      .eq('id', emp.id)
+    if (updateErr) { setEditPinError(updateErr.message); return }
+    setEditingPinId(null)
+    onChange()
+  }
+
+  // ── Photo (manual upload override — used when there's no linked
+  // student record, or the linked student's Lifetouch photo is missing) ─
+  const fileInputRef = useRef(null)
+  const [pendingUploadEmp, setPendingUploadEmp] = useState(null)
+  const [uploadingId, setUploadingId] = useState(null)
+  const [uploadError, setUploadError] = useState('')
+  const [photoUrls, setPhotoUrls] = useState({})
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadThumbs() {
+      const entries = await Promise.all((employees || []).map(async emp => {
+        const file = emp.photo_file || emp.students?.photo_file
+        if (!file) return [emp.id, null]
+        const { data } = await supabase.storage.from('student-photos').createSignedUrl(file, 300)
+        return [emp.id, data?.signedUrl || null]
+      }))
+      if (!cancelled) setPhotoUrls(Object.fromEntries(entries))
+    }
+    loadThumbs()
+    return () => { cancelled = true }
+  }, [employees])
+
+  function triggerUpload(emp) {
+    setUploadError('')
+    setPendingUploadEmp(emp)
+    fileInputRef.current?.click()
+  }
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !pendingUploadEmp) return
+    setUploadingId(pendingUploadEmp.id)
+    setUploadError('')
+
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+    const path = `manual/${pendingUploadEmp.id}-${Date.now()}.${ext}`
+    const { error: uploadErr } = await supabase.storage.from('student-photos').upload(path, file, { upsert: true })
+    if (uploadErr) {
+      setUploadError(uploadErr.message)
+      setUploadingId(null)
+      return
+    }
+    const { error: updateErr } = await supabase
+      .from('store_employees')
+      .update({ photo_file: path })
+      .eq('id', pendingUploadEmp.id)
+    setUploadingId(null)
+    if (updateErr) { setUploadError(updateErr.message); return }
+    setPendingUploadEmp(null)
+    onChange()
+  }
+
+  async function removePhoto(emp) {
+    if (!confirm(`Remove ${emp.name}'s uploaded photo? (This only removes the manual upload — a linked student's photo, if any, will show instead.)`)) return
+    await supabase.from('store_employees').update({ photo_file: null }).eq('id', emp.id)
+    onChange()
+  }
 
   // ── Student link (add form) ──────────────────────────────────────────
   const [studentQuery, setStudentQuery] = useState('')
@@ -163,6 +270,8 @@ export default function Roster({ employees, onChange }) {
 
   return (
     <div>
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelected} style={{ display: 'none' }} />
+
       <form onSubmit={addEmployee} style={{
         display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap',
         background: 'white', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 20,
@@ -217,6 +326,10 @@ export default function Roster({ employees, onChange }) {
         {error && <p style={{ width: '100%', color: '#991b1b', fontSize: 13, margin: '4px 0 0' }}>⚠️ {error}</p>}
       </form>
 
+      {uploadError && (
+        <p style={{ color: '#991b1b', fontSize: 13, margin: '0 0 10px' }}>⚠️ Photo upload failed: {uploadError}</p>
+      )}
+
       <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
           <thead>
@@ -225,6 +338,7 @@ export default function Roster({ employees, onChange }) {
               <th style={{ padding: '10px 14px' }}>Email</th>
               <th style={{ padding: '10px 14px' }}>NFC card</th>
               <th style={{ padding: '10px 14px' }}>Student photo link</th>
+              <th style={{ padding: '10px 14px' }}>Photo</th>
               <th style={{ padding: '10px 14px' }}>PIN</th>
               <th style={{ padding: '10px 14px' }}>QR badge</th>
               <th style={{ padding: '10px 14px' }}>Status</th>
@@ -233,12 +347,36 @@ export default function Roster({ employees, onChange }) {
           </thead>
           <tbody>
             {employees.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
+              <tr><td colSpan={9} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
             )}
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{emp.name}</td>
-                <td style={{ padding: '10px 14px', color: '#6b7280' }}>{emp.email || '—'}</td>
+                <td style={{ padding: '10px 14px', color: '#6b7280' }}>
+                  {editingEmailId === emp.id ? (
+                    <div>
+                      <input type="email" autoFocus value={editEmailInput} onChange={e => setEditEmailInput(e.target.value)}
+                        placeholder="name@example.com" autoComplete="off"
+                        style={{ padding: 6, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, width: 170 }} />
+                      <button onClick={() => saveEmail(emp)} style={{
+                        marginLeft: 6, padding: '6px 10px', borderRadius: 6, border: 'none', background: GREEN,
+                        color: 'white', fontSize: 12, cursor: 'pointer',
+                      }}>Save</button>
+                      <button onClick={() => setEditingEmailId(null)} style={{
+                        marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
+                        color: '#6b7280', fontSize: 12, cursor: 'pointer',
+                      }}>Cancel</button>
+                      {editEmailError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editEmailError}</div>}
+                    </div>
+                  ) : (
+                    <span>
+                      {emp.email || '—'}
+                      <button onClick={() => startEditEmail(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>{emp.email ? 'Edit' : 'Add'}</button>
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '10px 14px' }}>
                   {editingId === emp.id ? (
                     <div>
@@ -315,15 +453,72 @@ export default function Roster({ employees, onChange }) {
                   )}
                 </td>
                 <td style={{ padding: '10px 14px' }}>
-                  {emp.pin ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {photoUrls[emp.id] ? (
+                      <img src={photoUrls[emp.id]} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                    ) : (
+                      <div style={{
+                        width: 30, height: 30, borderRadius: '50%', background: '#f3f4f6', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#c1c9d2',
+                      }}>—</div>
+                    )}
+                    <div style={{ fontSize: 12 }}>
+                      {emp.photo_file ? (
+                        <span style={{ color: GREEN, fontWeight: 600, display: 'block' }}>Custom upload</span>
+                      ) : emp.students?.photo_file ? (
+                        <span style={{ color: '#6b7280', display: 'block' }}>From student record</span>
+                      ) : (
+                        <span style={{ color: '#c1c9d2', display: 'block' }}>No photo</span>
+                      )}
+                      <span>
+                        <button onClick={() => triggerUpload(emp)} disabled={uploadingId === emp.id} style={{
+                          border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0,
+                        }}>
+                          {uploadingId === emp.id ? 'Uploading…' : emp.photo_file ? 'Replace' : 'Upload'}
+                        </button>
+                        {emp.photo_file && (
+                          <button onClick={() => removePhoto(emp)} style={{
+                            marginLeft: 8, border: 'none', background: 'none', color: '#991b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0,
+                          }}>Remove</button>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '10px 14px' }}>
+                  {editingPinId === emp.id ? (
+                    <div>
+                      <input type="text" inputMode="numeric" maxLength={4} autoFocus
+                        value={editPinInput} onChange={e => setEditPinInput(e.target.value.replace(/\D/g, ''))}
+                        placeholder="4 digits" autoComplete="off"
+                        style={{ padding: 6, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, width: 80, letterSpacing: '0.15em' }} />
+                      <button onClick={() => savePin(emp)} style={{
+                        marginLeft: 6, padding: '6px 10px', borderRadius: 6, border: 'none', background: GREEN,
+                        color: 'white', fontSize: 12, cursor: 'pointer',
+                      }}>Save</button>
+                      <button onClick={() => setEditingPinId(null)} style={{
+                        marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
+                        color: '#6b7280', fontSize: 12, cursor: 'pointer',
+                      }}>Cancel</button>
+                      {editPinError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4 }}>⚠️ {editPinError}</div>}
+                    </div>
+                  ) : emp.pin ? (
                     <span>
                       <span style={{ color: GREEN, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em' }}>●●●●</span>
+                      <button onClick={() => startEditPin(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>Change</button>
                       <button onClick={() => resetPin(emp)} style={{
-                        marginLeft: 8, border: 'none', background: 'none', color: '#991b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        marginLeft: 6, border: 'none', background: 'none', color: '#991b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       }}>Reset</button>
                     </span>
                   ) : (
-                    <span style={{ color: '#c1c9d2', fontSize: 12 }}>Not set yet</span>
+                    <span>
+                      <span style={{ color: '#c1c9d2', fontSize: 12 }}>Not set yet</span>
+                      <button onClick={() => startEditPin(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>Set PIN</button>
+                    </span>
                   )}
                 </td>
                 <td style={{ padding: '10px 14px' }}>
