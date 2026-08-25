@@ -158,7 +158,7 @@ export default function Kiosk() {
     const openShift = openShifts[employee.id]
 
     let photoUrl = null
-    const linkedPhoto = employee.students?.photo_file
+    const linkedPhoto = employee.photo_file || employee.students?.photo_file
     if (linkedPhoto) {
       const { data } = await supabase.storage.from('student-photos').createSignedUrl(linkedPhoto, 300)
       if (data?.signedUrl) photoUrl = data.signedUrl
