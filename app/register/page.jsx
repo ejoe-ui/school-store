@@ -21,15 +21,13 @@ function initials(name) {
 export default function Register() {
   const [cashier, setCashier] = useState(null)
 
-  // ── Cashier login (PIN or NFC — same gate pattern as the punch clock kiosk) ──
+  // ── Roster + who's currently clocked in ──────────────────────────────
+  // Only employees with an open shift may ring up a sale — the Register is
+  // meant to be used from the floor during a shift, not by anyone who
+  // happens to know a PIN.
   const [employees, setEmployees] = useState([])
-  const [pendingEmployee, setPendingEmployee] = useState(null)
-  const [pinMode, setPinMode] = useState(null)   // 'verify' | 'set-first' | 'set-confirm'
-  const [pinError, setPinError] = useState('')
-  const [pinBusy, setPinBusy] = useState(false)
-  const [attempts, setAttempts] = useState(0)
-  const [firstPin, setFirstPin] = useState('')
-  const [loginError, setLoginError] = useState('')
+  const [openShifts, setOpenShifts] = useState({})   // employee_id -> shift row
+  const [loading, setLoading] = useState(true)
 
   const loadEmployees = useCallback(async () => {
     const { data } = await supabase
@@ -39,7 +37,31 @@ export default function Register() {
     setEmployees(data || [])
   }, [])
 
-  useEffect(() => { loadEmployees() }, [loadEmployees])
+  const loadOpenShifts = useCallback(async () => {
+    const { data } = await supabase
+      .from('store_shifts').select('*').is('clock_out_at', null)
+    const map = {}
+    ;(data || []).forEach(s => { map[s.employee_id] = s })
+    setOpenShifts(map)
+  }, [])
+
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadEmployees(), loadOpenShifts()])
+    setLoading(false)
+  }, [loadEmployees, loadOpenShifts])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  const clockedInEmployees = employees.filter(e => openShifts[e.id])
+
+  // ── Cashier login (PIN or NFC — same gate pattern as the punch clock) ──
+  const [pendingEmployee, setPendingEmployee] = useState(null)
+  const [pinMode, setPinMode] = useState(null)   // 'verify' | 'set-first' | 'set-confirm'
+  const [pinError, setPinError] = useState('')
+  const [pinBusy, setPinBusy] = useState(false)
+  const [attempts, setAttempts] = useState(0)
+  const [firstPin, setFirstPin] = useState('')
+  const [loginError, setLoginError] = useState('')
 
   const closeLogin = useCallback(() => {
     setPendingEmployee(null)
@@ -52,13 +74,17 @@ export default function Register() {
 
   const beginLogin = useCallback((employee) => {
     if (!employee) return
+    if (!openShifts[employee.id]) {
+      setLoginError(`${employee.name.split(' ')[0]} isn't clocked in — clock in at the kiosk first.`)
+      return
+    }
     setLoginError('')
     setPinError('')
     setAttempts(0)
     setFirstPin('')
     setPendingEmployee(employee)
     setPinMode(employee.pin ? 'verify' : 'set-first')
-  }, [])
+  }, [openShifts])
 
   const handlePinComplete = useCallback(async (digits) => {
     if (!pendingEmployee) return
@@ -175,30 +201,23 @@ export default function Register() {
   function endSession() {
     setCashier(null)
     setCart({})
-    setPaymentMethod(null)
     setCheckoutError('')
   }
 
-  // ── Checkout ────────────────────────────────────────────────────────
-  const [paymentMethod, setPaymentMethod] = useState(null)   // 'cash' | 'card'
+  // ── Checkout — logs the total, items, quantity, cashier, and time.
+  // No payment-method tracking, per how the register is meant to be used. ──
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
   const [saleFlash, setSaleFlash] = useState(null)   // { total }
 
   async function confirmSale() {
-    if (cartItems.length === 0 || !paymentMethod) return
+    if (cartItems.length === 0 || checkingOut) return
     setCheckingOut(true)
     setCheckoutError('')
 
     const { data: sale, error: saleErr } = await supabase
-      .from('sales')
-      .insert({
-        employee_id: cashier.id,
-        payment_method: paymentMethod,
-        subtotal,
-        discount,
-        total,
-      })
+      .from('store_sales')
+      .insert({ employee_id: cashier.id, total })
       .select()
       .single()
 
@@ -208,23 +227,16 @@ export default function Register() {
       return
     }
 
-    const lineItems = cartItems.map(({ product, qty }) => {
-      const unitPrice = Number(product.price)
-      const lineDiscount = product.sale_active && product.sale_pct_off
-        ? unitPrice * qty * (product.sale_pct_off / 100)
-        : 0
-      return {
-        sale_id: sale.id,
-        product_id: product.id,
-        product_name: product.name,
-        unit_price: unitPrice,
-        quantity: qty,
-        discount: lineDiscount,
-        line_total: unitPrice * qty - lineDiscount,
-      }
-    })
+    const lineItems = cartItems.map(({ product, qty, unitPrice }) => ({
+      sale_id: sale.id,
+      product_id: product.id,
+      product_name: product.name,
+      unit_price: unitPrice,
+      quantity: qty,
+      line_total: unitPrice * qty,
+    }))
 
-    const { error: lineErr } = await supabase.from('sale_line_items').insert(lineItems)
+    const { error: lineErr } = await supabase.from('store_sale_items').insert(lineItems)
     if (lineErr) {
       setCheckoutError(lineErr.message)
       setCheckingOut(false)
@@ -237,24 +249,25 @@ export default function Register() {
 
     setSaleFlash({ total })
     setCart({})
-    setPaymentMethod(null)
     setCheckingOut(false)
     loadProducts()
-    setTimeout(() => setSaleFlash(null), 3000)
+    setTimeout(() => setSaleFlash(null), 2500)
   }
 
-  // ── Derived cart totals ────────────────────────────────────────────
+  // ── Derived cart totals — sale price applied when a product is on sale ──
   const productById = Object.fromEntries(products.map(p => [p.id, p]))
   const cartItems = Object.entries(cart)
-    .map(([id, qty]) => ({ product: productById[id], qty }))
-    .filter(item => item.product)
+    .map(([id, qty]) => {
+      const product = productById[id]
+      if (!product) return null
+      const unitPrice = product.sale_active && product.sale_pct_off
+        ? Number(product.price) * (1 - product.sale_pct_off / 100)
+        : Number(product.price)
+      return { product, qty, unitPrice }
+    })
+    .filter(Boolean)
 
-  const subtotal = cartItems.reduce((sum, { product, qty }) => sum + Number(product.price) * qty, 0)
-  const discount = cartItems.reduce((sum, { product, qty }) => {
-    if (!product.sale_active || !product.sale_pct_off) return sum
-    return sum + Number(product.price) * qty * (product.sale_pct_off / 100)
-  }, 0)
-  const total = subtotal - discount
+  const total = cartItems.reduce((sum, { qty, unitPrice }) => sum + unitPrice * qty, 0)
 
   const pinTitle = pinMode === 'verify'
     ? `Enter your PIN — ${pendingEmployee?.name?.split(' ')[0] || ''}`
@@ -283,39 +296,42 @@ export default function Register() {
           </div>
           <div style={{ fontSize: 28, fontWeight: 800 }}>Register — Cashier Login</div>
           <div style={{ fontSize: 13, color: '#8fae9c', marginTop: 4 }}>
-            Tap your card, or tap your name — you'll enter your PIN next
+            Tap your card, or tap your name — you'll enter your PIN next. You need to be clocked in to ring up a sale.
           </div>
         </div>
 
         {loginError && (
-          <div style={{ color: '#f87171', fontSize: 14, fontWeight: 600, marginBottom: 16 }}>{loginError}</div>
+          <div style={{ color: '#f87171', fontSize: 14, fontWeight: 600, marginBottom: 16, maxWidth: 480 }}>{loginError}</div>
         )}
 
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
           gap: 14, overflowY: 'auto', paddingRight: 4,
         }}>
-          {employees.length === 0 && (
-            <div style={{ color: '#8fae9c' }}>No employees yet — add some in the manager dashboard.</div>
+          {!loading && clockedInEmployees.length === 0 && (
+            <div style={{ color: '#8fae9c' }}>Nobody's clocked in right now — clock in at the kiosk first.</div>
           )}
-          {employees.map(emp => (
+          {clockedInEmployees.map(emp => (
             <button
               key={emp.id}
               onClick={() => beginLogin(emp)}
               style={{
-                background: '#122a1f', border: '1px solid #1e3a2c',
+                background: '#122a1f', border: `1px solid ${GREEN}`,
                 borderRadius: 14, padding: '16px 12px', cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                 color: 'white', textAlign: 'center',
               }}>
               <div style={{
-                width: 48, height: 48, borderRadius: '50%', background: '#274a37',
+                width: 48, height: 48, borderRadius: '50%', background: GREEN,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontWeight: 700, fontSize: 15,
               }}>
                 {initials(emp.name)}
               </div>
               <div style={{ fontSize: 14, fontWeight: 600 }}>{emp.name}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#7CFFB2' }}>
+                Clocked in
+              </div>
             </button>
           ))}
         </div>
@@ -358,6 +374,7 @@ export default function Register() {
             padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: 'white',
             color: '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer',
           }}>End session</button>
+          <a href="/" style={{ color: '#6b7280', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>← Kiosk</a>
         </div>
       </div>
 
@@ -437,70 +454,48 @@ export default function Register() {
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-            {cartItems.map(({ product, qty }) => {
-              const unitPrice = product.sale_active && product.sale_pct_off
-                ? Number(product.price) * (1 - product.sale_pct_off / 100)
-                : Number(product.price)
-              return (
-                <div key={product.id} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                    <span>{product.name}</span>
-                    <span>${(unitPrice * qty).toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                    <button onClick={() => decrementQty(product)} style={stepperBtnStyle}>−</button>
-                    <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{qty}</span>
-                    <button onClick={() => addToCart(product)} disabled={qty >= product.stock} style={{
-                      ...stepperBtnStyle, opacity: qty >= product.stock ? 0.4 : 1,
-                    }}>+</button>
-                    <button onClick={() => removeFromCart(product)} style={{
-                      marginLeft: 'auto', border: 'none', background: 'none', color: '#991b1b',
-                      fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    }}>Remove</button>
-                  </div>
+            {cartItems.map(({ product, qty, unitPrice }) => (
+              <div key={product.id} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                  <span>{product.name}</span>
+                  <span>${(unitPrice * qty).toFixed(2)}</span>
                 </div>
-              )
-            })}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <button onClick={() => decrementQty(product)} style={stepperBtnStyle}>−</button>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{qty}</span>
+                  <button onClick={() => addToCart(product)} disabled={qty >= product.stock} style={{
+                    ...stepperBtnStyle, opacity: qty >= product.stock ? 0.4 : 1,
+                  }}>+</button>
+                  <button onClick={() => removeFromCart(product)} style={{
+                    marginLeft: 'auto', border: 'none', background: 'none', color: '#991b1b',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>Remove</button>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280' }}>
-              <span>Subtotal</span>
-              <span>${subtotal.toFixed(2)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280' }}>
-              <span>Discount</span>
-              <span>{discount > 0 ? `-$${discount.toFixed(2)}` : '$0.00'}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 800, color: '#111827', marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 800, color: '#111827' }}>
               <span>Total</span>
               <span>${total.toFixed(2)}</span>
             </div>
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-              <button onClick={() => setPaymentMethod('cash')} style={paymentBtnStyle(paymentMethod === 'cash')}>
-                💵 Cash
-              </button>
-              <button onClick={() => setPaymentMethod('card')} style={paymentBtnStyle(paymentMethod === 'card')}>
-                💳 Card
-              </button>
-            </div>
-
             {checkoutError && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{checkoutError}</div>}
 
             <button
               onClick={confirmSale}
-              disabled={cartItems.length === 0 || !paymentMethod || checkingOut}
+              disabled={cartItems.length === 0 || checkingOut}
               style={{
                 width: '100%', padding: '12px', borderRadius: 10, border: 'none',
-                background: (cartItems.length === 0 || !paymentMethod) ? '#e5e7eb' : GREEN,
-                color: (cartItems.length === 0 || !paymentMethod) ? '#9ca3af' : 'white',
+                background: cartItems.length === 0 ? '#e5e7eb' : GREEN,
+                color: cartItems.length === 0 ? '#9ca3af' : 'white',
                 fontSize: 14, fontWeight: 700,
-                cursor: (cartItems.length === 0 || !paymentMethod || checkingOut) ? 'default' : 'pointer',
+                cursor: (cartItems.length === 0 || checkingOut) ? 'default' : 'pointer',
               }}>
-              {checkingOut ? 'Processing…' : `Confirm sale — $${total.toFixed(2)}`}
+              {checkingOut ? 'Processing…' : `Complete sale — $${total.toFixed(2)}`}
             </button>
           </div>
         </div>
@@ -521,15 +516,6 @@ export default function Register() {
       )}
     </div>
   )
-}
-
-function paymentBtnStyle(active) {
-  return {
-    flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
-    border: active ? `2px solid ${GREEN}` : '1px solid #d1d5db',
-    background: active ? '#ECFDF5' : 'white',
-    color: active ? GREEN : '#374151',
-  }
 }
 
 const stepperBtnStyle = {
