@@ -82,6 +82,7 @@ export default function Inventory({ products, onChange }) {
     setEditNameError('')
     const value = editNameInput.trim()
     if (!value) { setEditNameError('Name cannot be empty.'); return }
+    if (value === product.name) { setEditingNameId(null); return }
     const { error: updateErr } = await supabase
       .from('products')
       .update({ name: value })
@@ -89,6 +90,11 @@ export default function Inventory({ products, onChange }) {
     if (updateErr) { setEditNameError(updateErr.message); return }
     setEditingNameId(null)
     onChange()
+  }
+
+  function cancelEditName() {
+    setEditingNameId(null)
+    setEditNameError('')
   }
 
   // ── Price (inline edit on existing rows) ───────────────────────────────
@@ -106,6 +112,7 @@ export default function Inventory({ products, onChange }) {
     setEditPriceError('')
     const value = Number(editPriceInput)
     if (!Number.isFinite(value) || value < 0) { setEditPriceError('Enter a valid price.'); return }
+    if (value === Number(product.price)) { setEditingPriceId(null); return }
     const { error: updateErr } = await supabase
       .from('products')
       .update({ price: value })
@@ -113,6 +120,11 @@ export default function Inventory({ products, onChange }) {
     if (updateErr) { setEditPriceError(updateErr.message); return }
     setEditingPriceId(null)
     onChange()
+  }
+
+  function cancelEditPrice() {
+    setEditingPriceId(null)
+    setEditPriceError('')
   }
 
   // ── Stock (inline edit on existing rows) ───────────────────────────────
@@ -130,6 +142,7 @@ export default function Inventory({ products, onChange }) {
     setEditStockError('')
     const value = Number(editStockInput)
     if (!Number.isInteger(value) || value < 0) { setEditStockError('Enter a whole number.'); return }
+    if (value === Number(product.stock)) { setEditingStockId(null); return }
     const { error: updateErr } = await supabase
       .from('products')
       .update({ stock: value })
@@ -137,6 +150,11 @@ export default function Inventory({ products, onChange }) {
     if (updateErr) { setEditStockError(updateErr.message); return }
     setEditingStockId(null)
     onChange()
+  }
+
+  function cancelEditStock() {
+    setEditingStockId(null)
+    setEditStockError('')
   }
 
   // ── Specials (manual on/off toggle — percent off + label) ─────────────
@@ -296,41 +314,57 @@ export default function Inventory({ products, onChange }) {
               <div style={{ marginBottom: 8 }}>
                 <input
                   autoFocus value={editNameInput} onChange={e => setEditNameInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && saveName(product)}
-                  style={{ padding: '6px 8px', fontSize: 14, borderRadius: 6, border: '1px solid #d1d5db', width: '100%' }}
+                  onBlur={() => saveName(product)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.currentTarget.blur() }
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEditName() }
+                  }}
+                  style={{ padding: '8px 10px', fontSize: 14, borderRadius: 6, border: `1px solid ${GREEN}`, width: '100%', boxSizing: 'border-box' }}
                 />
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                  <button onClick={() => saveName(product)} style={smallBtnStyle(GREEN)}>Save</button>
-                  <button onClick={() => setEditingNameId(null)} style={smallBtnStyle('#6b7280')}>Cancel</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => saveName(product)} style={smallBtnStyle(GREEN)}>Save</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={cancelEditName} style={smallBtnStyle('#6b7280')}>Cancel</button>
                 </div>
                 {editNameError && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{editNameError}</div>}
+                <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>Saves automatically when you click away.</div>
               </div>
             ) : (
               <div
                 onClick={() => startEditName(product)}
-                style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 8, cursor: 'pointer' }}
+                style={{
+                  fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 8, cursor: 'pointer',
+                  display: 'inline-block', borderBottom: '1px dashed #9ca3af', paddingBottom: 1,
+                }}
                 title="Click to edit"
               >
-                {product.name}
+                {product.name} <span style={{ fontSize: 11 }}>✎</span>
               </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
               <span>Price</span>
               {editingPriceId === product.id ? (
-                <span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <input
                     autoFocus value={editPriceInput} onChange={e => setEditPriceInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && savePrice(product)}
+                    onBlur={() => savePrice(product)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.currentTarget.blur() }
+                      if (e.key === 'Escape') { e.preventDefault(); cancelEditPrice() }
+                    }}
                     inputMode="decimal"
-                    style={{ padding: '4px 6px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', width: 70 }}
+                    style={{ padding: '7px 8px', fontSize: 14, borderRadius: 6, border: `1px solid ${GREEN}`, width: 76 }}
                   />
-                  {' '}
-                  <button onClick={() => savePrice(product)} style={smallBtnStyle(GREEN)}>✓</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => savePrice(product)} style={smallBtnStyle(GREEN)} title="Save">✓</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={cancelEditPrice} style={smallBtnStyle('#6b7280')} title="Cancel">✕</button>
                 </span>
               ) : (
-                <span onClick={() => startEditPrice(product)} style={{ cursor: 'pointer', fontWeight: 600, color: '#111827' }} title="Click to edit">
-                  ${Number(product.price).toFixed(2)}
+                <span
+                  onClick={() => startEditPrice(product)}
+                  style={{ cursor: 'pointer', fontWeight: 600, color: '#111827', borderBottom: '1px dashed #9ca3af', paddingBottom: 1 }}
+                  title="Click to edit"
+                >
+                  ${Number(product.price).toFixed(2)} <span style={{ fontSize: 10 }}>✎</span>
                 </span>
               )}
             </div>
@@ -349,19 +383,27 @@ export default function Inventory({ products, onChange }) {
                 )}
               </span>
               {editingStockId === product.id ? (
-                <span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <input
                     autoFocus value={editStockInput} onChange={e => setEditStockInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && saveStock(product)}
+                    onBlur={() => saveStock(product)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.currentTarget.blur() }
+                      if (e.key === 'Escape') { e.preventDefault(); cancelEditStock() }
+                    }}
                     inputMode="numeric"
-                    style={{ padding: '4px 6px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', width: 60 }}
+                    style={{ padding: '7px 8px', fontSize: 14, borderRadius: 6, border: `1px solid ${GREEN}`, width: 66 }}
                   />
-                  {' '}
-                  <button onClick={() => saveStock(product)} style={smallBtnStyle(GREEN)}>✓</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => saveStock(product)} style={smallBtnStyle(GREEN)} title="Save">✓</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={cancelEditStock} style={smallBtnStyle('#6b7280')} title="Cancel">✕</button>
                 </span>
               ) : (
-                <span onClick={() => startEditStock(product)} style={{ cursor: 'pointer', fontWeight: 600, color: '#111827' }} title="Click to edit">
-                  {product.stock}
+                <span
+                  onClick={() => startEditStock(product)}
+                  style={{ cursor: 'pointer', fontWeight: 600, color: '#111827', borderBottom: '1px dashed #9ca3af', paddingBottom: 1 }}
+                  title="Click to edit"
+                >
+                  {product.stock} <span style={{ fontSize: 10 }}>✎</span>
                 </span>
               )}
             </div>
@@ -426,7 +468,7 @@ export default function Inventory({ products, onChange }) {
 
 function smallBtnStyle(bg) {
   return {
-    padding: '4px 10px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none',
-    background: bg, color: 'white', cursor: 'pointer',
+    padding: '7px 12px', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none',
+    background: bg, color: 'white', cursor: 'pointer', minHeight: 30,
   }
 }
