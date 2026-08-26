@@ -290,7 +290,17 @@ export default function Inventory({ products, onChange }) {
             {editPriceError && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 4 }}>{editPriceError}</div>}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280' }}>
-              <span>Stock</span>
+              <span>
+                Stock
+                {product.stock < (product.low_stock_threshold ?? 5) && (
+                  <span style={{
+                    marginLeft: 6, padding: '2px 6px', fontSize: 10, fontWeight: 700,
+                    borderRadius: 999, background: '#fef2f2', color: '#dc2626', letterSpacing: '0.02em',
+                  }}>
+                    LOW STOCK
+                  </span>
+                )}
+              </span>
               {editingStockId === product.id ? (
                 <span>
                   <input
