@@ -11,6 +11,7 @@ import Schedule from './components/Schedule'
 import Swaps from './components/Swaps'
 import Roster from './components/Roster'
 import Inventory from './components/Inventory'
+import Sales from './components/Sales'
 
 const GREEN = '#006938'
 const DARK  = '#0b1f16'
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'swaps',     label: 'Swaps' },
   { key: 'roster',    label: 'Roster' },
   { key: 'inventory', label: 'Inventory' },
+  { key: 'sales',     label: 'Sales' },
 ]
 
 function initials(name) {
@@ -265,6 +267,7 @@ export default function ManagerPage() {
         {tab === 'swaps'     && <Swaps employees={employees} />}
         {tab === 'roster'    && <Roster employees={employees} onChange={loadEmployees} currentManagerId={manager.id} />}
         {tab === 'inventory' && <Inventory products={products} onChange={loadProducts} />}
+        {tab === 'sales'     && <Sales employees={employees} />}
       </div>
     </div>
   )

@@ -463,6 +463,8 @@ export default function Kiosk() {
         {' · '}
         <a href="/summary" style={{ color: '#4d6d5b' }}>My hours</a>
         {' · '}
+        <a href="/register" style={{ color: '#4d6d5b' }}>Register</a>
+        {' · '}
         <a href="/manager" style={{ color: '#4d6d5b' }}>Manager</a>
       </div>
     </div>
