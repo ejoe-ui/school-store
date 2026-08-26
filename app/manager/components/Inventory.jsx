@@ -139,6 +139,45 @@ export default function Inventory({ products, onChange }) {
     onChange()
   }
 
+  // ── Specials (manual on/off toggle — percent off + label) ─────────────
+  const [editingSaleId, setEditingSaleId] = useState(null)
+  const [editSalePctInput, setEditSalePctInput] = useState('')
+  const [editSaleLabelInput, setEditSaleLabelInput] = useState('')
+  const [editSaleError, setEditSaleError] = useState('')
+
+  function startEditSale(product) {
+    setEditingSaleId(product.id)
+    setEditSalePctInput(product.sale_pct_off ? String(product.sale_pct_off) : '')
+    setEditSaleLabelInput(product.sale_label || '')
+    setEditSaleError('')
+  }
+
+  async function saveSale(product) {
+    setEditSaleError('')
+    const pct = Number(editSalePctInput)
+    if (!Number.isInteger(pct) || pct < 1 || pct > 100) {
+      setEditSaleError('Enter a percent off between 1 and 100.')
+      return
+    }
+    const label = editSaleLabelInput.trim()
+    if (!label) {
+      setEditSaleError('Give the special a label, e.g. "Homecoming Sale — 20% off".')
+      return
+    }
+    const { error: updateErr } = await supabase
+      .from('products')
+      .update({ sale_active: true, sale_pct_off: pct, sale_label: label })
+      .eq('id', product.id)
+    if (updateErr) { setEditSaleError(updateErr.message); return }
+    setEditingSaleId(null)
+    onChange()
+  }
+
+  async function turnOffSale(product) {
+    await supabase.from('products').update({ sale_active: false }).eq('id', product.id)
+    onChange()
+  }
+
   // ── Add product ─────────────────────────────────────────────────────────
   async function addProduct(e) {
     e.preventDefault()
@@ -240,6 +279,14 @@ export default function Inventory({ products, onChange }) {
                   ✕
                 </button>
               )}
+              {product.sale_active && (
+                <span style={{
+                  position: 'absolute', top: 6, left: 6, padding: '2px 7px', fontSize: 10, fontWeight: 700,
+                  borderRadius: 999, background: '#fef3c7', color: '#92400e', letterSpacing: '0.02em',
+                }}>
+                  🏷️ {product.sale_label || `${product.sale_pct_off}% OFF`}
+                </span>
+              )}
             </div>
             {uploadError && pendingUploadProduct?.id === product.id && (
               <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{uploadError}</div>
@@ -319,6 +366,54 @@ export default function Inventory({ products, onChange }) {
               )}
             </div>
             {editStockError && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{editStockError}</div>}
+
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+              {editingSaleId === product.id ? (
+                <div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <input
+                      autoFocus value={editSalePctInput} onChange={e => setEditSalePctInput(e.target.value)}
+                      placeholder="% off" inputMode="numeric"
+                      style={{ padding: '6px 8px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', width: 64 }}
+                    />
+                    <input
+                      value={editSaleLabelInput} onChange={e => setEditSaleLabelInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && saveSale(product)}
+                      placeholder='Label, e.g. "Homecoming Sale"'
+                      style={{ padding: '6px 8px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', flex: 1, minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => saveSale(product)} style={smallBtnStyle(GREEN)}>Start special</button>
+                    <button onClick={() => setEditingSaleId(null)} style={smallBtnStyle('#6b7280')}>Cancel</button>
+                  </div>
+                  {editSaleError && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{editSaleError}</div>}
+                </div>
+              ) : product.sale_active ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{
+                    padding: '3px 8px', fontSize: 11, fontWeight: 700, borderRadius: 999,
+                    background: '#fef3c7', color: '#92400e', letterSpacing: '0.02em',
+                  }}>
+                    🏷️ {product.sale_label || `${product.sale_pct_off}% OFF`}
+                  </span>
+                  <span style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => startEditSale(product)} title="Edit special" style={smallBtnStyle('#6b7280')}>✎</button>
+                    <button onClick={() => turnOffSale(product)} style={smallBtnStyle('#dc2626')}>End special</button>
+                  </span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => startEditSale(product)}
+                  style={{
+                    width: '100%', padding: '6px 10px', fontSize: 12, fontWeight: 600, borderRadius: 6,
+                    border: '1px dashed #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer',
+                  }}
+                >
+                  🏷️ Start a special
+                </button>
+              )}
+            </div>
           </div>
         ))}
         {(!products || products.length === 0) && (
