@@ -29,6 +29,27 @@ export default function PinPad({ length = 4, title, subtitle, error, busy, onCom
     setDigits(prev => prev.slice(0, -1))
   }
 
+  // Let the physical keyboard drive the pad too — 0-9 to type a digit,
+  // Backspace/Delete to erase, Escape to cancel. Keeps everything routed
+  // through the same press()/backspace() logic the on-screen buttons use.
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (busy) return
+      if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault()
+        press(e.key)
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault()
+        backspace()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        onCancel && onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy, onCancel])
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(11,31,22,0.97)',
@@ -60,6 +81,8 @@ export default function PinPad({ length = 4, title, subtitle, error, busy, onCom
         <button onClick={() => press('0')} disabled={busy} style={keyStyle}>0</button>
         <button onClick={backspace} disabled={busy} style={keyStyle}>⌫</button>
       </div>
+
+      <div style={{ fontSize: 12, color: '#4d6d5b', marginTop: 2 }}>You can also type on your keyboard</div>
     </div>
   )
 }
