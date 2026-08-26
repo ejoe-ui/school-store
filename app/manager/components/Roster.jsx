@@ -19,6 +19,30 @@ export default function Roster({ employees, onChange }) {
   const [qrEmployee, setQrEmployee] = useState(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
 
+  // ── Name (inline edit on existing rows) ────────────────────────────────
+  const [editingNameId, setEditingNameId] = useState(null)
+  const [editNameInput, setEditNameInput] = useState('')
+  const [editNameError, setEditNameError] = useState('')
+
+  function startEditName(emp) {
+    setEditingNameId(emp.id)
+    setEditNameInput(emp.name || '')
+    setEditNameError('')
+  }
+
+  async function saveName(emp) {
+    setEditNameError('')
+    const value = editNameInput.trim()
+    if (!value) { setEditNameError('Name cannot be empty.'); return }
+    const { error: updateErr } = await supabase
+      .from('store_employees')
+      .update({ name: value })
+      .eq('id', emp.id)
+    if (updateErr) { setEditNameError(updateErr.message); return }
+    setEditingNameId(null)
+    onChange()
+  }
+
   // ── Email (inline edit on existing rows) ──────────────────────────────
   const [editingEmailId, setEditingEmailId] = useState(null)
   const [editEmailInput, setEditEmailInput] = useState('')
@@ -351,7 +375,31 @@ export default function Roster({ employees, onChange }) {
             )}
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
-                <td style={{ padding: '10px 14px', fontWeight: 600 }}>{emp.name}</td>
+                <td style={{ padding: '10px 14px', fontWeight: 600 }}>
+                  {editingNameId === emp.id ? (
+                    <div>
+                      <input type="text" autoFocus value={editNameInput} onChange={e => setEditNameInput(e.target.value)}
+                        placeholder="Full name" autoComplete="off"
+                        style={{ padding: 6, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, width: 160, fontWeight: 400 }} />
+                      <button onClick={() => saveName(emp)} style={{
+                        marginLeft: 6, padding: '6px 10px', borderRadius: 6, border: 'none', background: GREEN,
+                        color: 'white', fontSize: 12, cursor: 'pointer',
+                      }}>Save</button>
+                      <button onClick={() => setEditingNameId(null)} style={{
+                        marginLeft: 4, padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white',
+                        color: '#6b7280', fontSize: 12, cursor: 'pointer',
+                      }}>Cancel</button>
+                      {editNameError && <div style={{ color: '#991b1b', fontSize: 12, marginTop: 4, fontWeight: 400 }}>⚠️ {editNameError}</div>}
+                    </div>
+                  ) : (
+                    <span>
+                      {emp.name}
+                      <button onClick={() => startEditName(emp)} style={{
+                        marginLeft: 8, border: 'none', background: 'none', color: GREEN, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>Edit</button>
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '10px 14px', color: '#6b7280' }}>
                   {editingEmailId === emp.id ? (
                     <div>
