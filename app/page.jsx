@@ -154,7 +154,10 @@ export default function Kiosk() {
   }, [])
 
   // ── Punch logic (only ever called after a PIN has been verified) ────────
-  const punch = useCallback(async (employee) => {
+  // `overrideBy` is set when a manager used their own PIN to punch on
+  // someone else's behalf (e.g. fixing a forgotten checkout) instead of
+  // the employee's own PIN — see handlePinComplete.
+  const punch = useCallback(async (employee, overrideBy = null) => {
     const openShift = openShifts[employee.id]
 
     let photoUrl = null
@@ -169,24 +172,35 @@ export default function Kiosk() {
       const clockOutAt = new Date().toISOString()
       const mins = minutesBetween(openShift.clock_in_at, clockOutAt)
       await supabase.from('store_shifts')
-        .update({ clock_out_at: clockOutAt })
+        .update(overrideBy
+          ? { clock_out_at: clockOutAt, corrected: true, notes: `Clocked out by ${overrideBy.name} (advisor override)` }
+          : { clock_out_at: clockOutAt })
         .eq('id', openShift.id)
       showFlash({
         kind: 'bye',
         text: `See you, ${employee.name.split(' ')[0]}!`,
-        sub: `Worked ${fmtDuration(mins)} — pending manager approval`,
+        sub: overrideBy
+          ? `Worked ${fmtDuration(mins)} — clocked out by ${overrideBy.name.split(' ')[0]}`
+          : `Worked ${fmtDuration(mins)} — pending manager approval`,
         photoUrl,
       })
     } else {
       // ── Clock in ───────────────────────────────────────────────────────
-      await supabase.from('store_shifts').insert({
-        employee_id: employee.id,
-        clock_in_at: new Date().toISOString(),
-      })
+      await supabase.from('store_shifts').insert(overrideBy
+        ? {
+            employee_id: employee.id,
+            clock_in_at: new Date().toISOString(),
+            corrected: true,
+            notes: `Clocked in by ${overrideBy.name} (advisor override)`,
+          }
+        : {
+            employee_id: employee.id,
+            clock_in_at: new Date().toISOString(),
+          })
       showFlash({
         kind: 'welcome',
         text: `Welcome, ${employee.name.split(' ')[0]}!`,
-        sub: 'Clocked in',
+        sub: overrideBy ? `Clocked in by ${overrideBy.name.split(' ')[0]}` : 'Clocked in',
         photoUrl,
       })
     }
@@ -223,6 +237,22 @@ export default function Kiosk() {
         closePunch()
         return
       }
+
+      // ── Advisor override ────────────────────────────────────────────
+      // Not this employee's own PIN — but if it matches an active
+      // manager's PIN, let the manager punch on this employee's behalf
+      // (e.g. fixing a forgotten checkout). Every manager already has
+      // their own PIN from the Roster tab, so there's no separate code
+      // to remember, and the shift gets flagged (corrected + notes) so
+      // it's obvious in Approvals that this wasn't a self-punch.
+      const overridingManager = employees.find(e => e.is_manager && e.pin && e.pin === digits)
+      if (overridingManager) {
+        setPinBusy(true)
+        await punch(pendingEmployee, overridingManager)
+        closePunch()
+        return
+      }
+
       const next = attempts + 1
       if (next >= 3) {
         showFlash({ kind: 'error', text: 'Too many tries', sub: 'Ask a manager for help with your PIN' }, 3500)
@@ -254,7 +284,7 @@ export default function Kiosk() {
       loadEmployees()
       closePunch()
     }
-  }, [pendingEmployee, pinMode, attempts, firstPin, punch, showFlash, closePunch, loadEmployees])
+  }, [pendingEmployee, pinMode, attempts, firstPin, punch, showFlash, closePunch, loadEmployees, employees])
 
   // ── NFC scan handler ──────────────────────────────────────────────────
   const handleScan = useCallback(async (rawUid) => {
@@ -284,7 +314,7 @@ export default function Kiosk() {
       : `Choose a PIN — ${pendingEmployee?.name?.split(' ')[0] || ''}`
 
   const pinSubtitle = pinMode === 'verify'
-    ? 'Ask a manager to reset it if you forgot.'
+    ? 'Ask a manager to reset it if you forgot — or a manager can enter their own PIN to clock you in/out.'
     : pinMode === 'set-confirm'
       ? 'Enter the same 4 digits again to confirm.'
       : 'Pick 4 digits nobody else knows. You’ll use it every time you clock in or out.'
