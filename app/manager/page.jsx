@@ -7,6 +7,7 @@ import TotalsPoints from './components/TotalsPoints'
 import Schedule from './components/Schedule'
 import Swaps from './components/Swaps'
 import Roster from './components/Roster'
+import Inventory from './components/Inventory'
 
 const GREEN = '#006938'
 const TABS = [
@@ -15,6 +16,7 @@ const TABS = [
   { key: 'schedule',  label: 'Schedule' },
   { key: 'swaps',     label: 'Swaps' },
   { key: 'roster',    label: 'Roster' },
+  { key: 'inventory', label: 'Inventory' },
 ]
 
 export default function ManagerPage() {
@@ -23,13 +25,20 @@ export default function ManagerPage() {
   const [pinError, setPinError] = useState(false)
   const [tab, setTab] = useState('approvals')
   const [employees, setEmployees] = useState([])
+  const [products, setProducts] = useState([])
 
   const loadEmployees = useCallback(async () => {
     const { data } = await supabase.from('store_employees').select('*').order('name')
     setEmployees(await attachStudents(data))
   }, [])
 
+  const loadProducts = useCallback(async () => {
+    const { data } = await supabase.from('products').select('*').order('name')
+    setProducts(data || [])
+  }, [])
+
   useEffect(() => { if (unlocked) loadEmployees() }, [unlocked, loadEmployees])
+  useEffect(() => { if (unlocked) loadProducts() }, [unlocked, loadProducts])
 
   async function handlePinSubmit(e) {
     e.preventDefault()
@@ -105,6 +114,7 @@ export default function ManagerPage() {
         {tab === 'schedule'  && <Schedule employees={employees} />}
         {tab === 'swaps'     && <Swaps employees={employees} />}
         {tab === 'roster'    && <Roster employees={employees} onChange={loadEmployees} />}
+        {tab === 'inventory' && <Inventory products={products} onChange={loadProducts} />}
       </div>
     </div>
   )
