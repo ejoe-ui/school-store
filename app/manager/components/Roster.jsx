@@ -7,7 +7,7 @@ import QRCode from 'qrcode'
 
 const GREEN = '#006938'
 
-export default function Roster({ employees, onChange }) {
+export default function Roster({ employees, onChange, currentManagerId }) {
   const [form, setForm] = useState({ name: '', email: '', nfcInput: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -253,6 +253,16 @@ export default function Roster({ employees, onChange }) {
     onChange()
   }
 
+  // ── Manager access (who can log into /manager) ─────────────────────────
+  async function toggleManager(emp) {
+    if (emp.id === currentManagerId && emp.is_manager) {
+      alert("You can't remove your own manager access — ask another manager to do it.")
+      return
+    }
+    await supabase.from('store_employees').update({ is_manager: !emp.is_manager }).eq('id', emp.id)
+    onChange()
+  }
+
   // QR badges just encode the employee's id — the kiosk's QR scanner looks
   // it straight back up via resolveEmployeeById, no extra token needed.
   async function showQr(emp) {
@@ -366,12 +376,13 @@ export default function Roster({ employees, onChange }) {
               <th style={{ padding: '10px 14px' }}>PIN</th>
               <th style={{ padding: '10px 14px' }}>QR badge</th>
               <th style={{ padding: '10px 14px' }}>Status</th>
+              <th style={{ padding: '10px 14px' }}>Manager access</th>
               <th style={{ padding: '10px 14px' }}></th>
             </tr>
           </thead>
           <tbody>
             {employees.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
+              <tr><td colSpan={10} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>No employees yet.</td></tr>
             )}
             {employees.map(emp => (
               <tr key={emp.id} style={{ borderTop: '1px solid #f0f0f0' }}>
@@ -583,6 +594,26 @@ export default function Roster({ employees, onChange }) {
                   }}>
                     {emp.active ? 'Active' : 'Inactive'}
                   </span>
+                </td>
+                <td style={{ padding: '10px 14px' }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 8,
+                    background: emp.is_manager ? '#EFF6FF' : '#F3F4F6', color: emp.is_manager ? '#1D4ED8' : '#6b7280',
+                    textTransform: 'uppercase',
+                  }}>
+                    {emp.is_manager ? 'Manager' : 'Staff'}
+                  </span>
+                  <button
+                    onClick={() => toggleManager(emp)}
+                    disabled={emp.id === currentManagerId && emp.is_manager}
+                    title={emp.id === currentManagerId && emp.is_manager ? "You can't remove your own manager access" : undefined}
+                    style={{
+                      marginLeft: 8, border: 'none', background: 'none', fontSize: 12, fontWeight: 600,
+                      color: emp.id === currentManagerId && emp.is_manager ? '#c1c9d2' : (emp.is_manager ? '#ef4444' : GREEN),
+                      cursor: emp.id === currentManagerId && emp.is_manager ? 'not-allowed' : 'pointer',
+                    }}>
+                    {emp.is_manager ? 'Revoke' : 'Grant'}
+                  </button>
                 </td>
                 <td style={{ padding: '10px 14px' }}>
                   <button onClick={() => toggleActive(emp)} style={{
