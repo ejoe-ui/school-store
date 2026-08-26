@@ -112,7 +112,7 @@ export default function Register() {
     beginLogin(employee)
   }, [beginLogin])
 
-  // ── Products ──────────────────────────────────────────────────────
+  // ── Products ────────────────────────────────────────────────────────
   const [products, setProducts] = useState([])
   const [photoUrls, setPhotoUrls] = useState({})
 
@@ -175,6 +175,72 @@ export default function Register() {
   function endSession() {
     setCashier(null)
     setCart({})
+    setPaymentMethod(null)
+    setCheckoutError('')
+  }
+
+  // ── Checkout ────────────────────────────────────────────────────────
+  const [paymentMethod, setPaymentMethod] = useState(null)   // 'cash' | 'card'
+  const [checkingOut, setCheckingOut] = useState(false)
+  const [checkoutError, setCheckoutError] = useState('')
+  const [saleFlash, setSaleFlash] = useState(null)   // { total }
+
+  async function confirmSale() {
+    if (cartItems.length === 0 || !paymentMethod) return
+    setCheckingOut(true)
+    setCheckoutError('')
+
+    const { data: sale, error: saleErr } = await supabase
+      .from('sales')
+      .insert({
+        employee_id: cashier.id,
+        payment_method: paymentMethod,
+        subtotal,
+        discount,
+        total,
+      })
+      .select()
+      .single()
+
+    if (saleErr) {
+      setCheckoutError(saleErr.message)
+      setCheckingOut(false)
+      return
+    }
+
+    const lineItems = cartItems.map(({ product, qty }) => {
+      const unitPrice = Number(product.price)
+      const lineDiscount = product.sale_active && product.sale_pct_off
+        ? unitPrice * qty * (product.sale_pct_off / 100)
+        : 0
+      return {
+        sale_id: sale.id,
+        product_id: product.id,
+        product_name: product.name,
+        unit_price: unitPrice,
+        quantity: qty,
+        discount: lineDiscount,
+        line_total: unitPrice * qty - lineDiscount,
+      }
+    })
+
+    const { error: lineErr } = await supabase.from('sale_line_items').insert(lineItems)
+    if (lineErr) {
+      setCheckoutError(lineErr.message)
+      setCheckingOut(false)
+      return
+    }
+
+    await Promise.all(cartItems.map(({ product, qty }) =>
+      supabase.from('products').update({ stock: product.stock - qty }).eq('id', product.id)
+    ))
+
+    setSaleFlash({ total })
+    setCart({})
+    setPaymentMethod(null)
+    setCheckingOut(false)
+    loadProducts()
+    setTimeout(() => setSaleFlash(null), 3000)
   }
 
   // ── Derived cart totals ────────────────────────────────────────────
@@ -412,16 +478,58 @@ export default function Register() {
             </div>
           </div>
 
-          <button disabled style={{
-            width: '100%', marginTop: 16, padding: '12px', borderRadius: 10, border: 'none',
-            background: '#e5e7eb', color: '#9ca3af', fontSize: 14, fontWeight: 700, cursor: 'default',
-          }}>
-            Checkout — coming next
-          </button>
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <button onClick={() => setPaymentMethod('cash')} style={paymentBtnStyle(paymentMethod === 'cash')}>
+                💵 Cash
+              </button>
+              <button onClick={() => setPaymentMethod('card')} style={paymentBtnStyle(paymentMethod === 'card')}>
+                💳 Card
+              </button>
+            </div>
+
+            {checkoutError && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{checkoutError}</div>}
+
+            <button
+              onClick={confirmSale}
+              disabled={cartItems.length === 0 || !paymentMethod || checkingOut}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+                background: (cartItems.length === 0 || !paymentMethod) ? '#e5e7eb' : GREEN,
+                color: (cartItems.length === 0 || !paymentMethod) ? '#9ca3af' : 'white',
+                fontSize: 14, fontWeight: 700,
+                cursor: (cartItems.length === 0 || !paymentMethod || checkingOut) ? 'default' : 'pointer',
+              }}>
+              {checkingOut ? 'Processing…' : `Confirm sale — $${total.toFixed(2)}`}
+            </button>
+          </div>
         </div>
       </div>
+
+      {saleFlash && (
+        <div
+          onClick={() => setSaleFlash(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: `linear-gradient(135deg, ${GREEN}, #003d20)`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
+          }}>
+          <div style={{ fontSize: 48 }}>✅</div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: 'white' }}>Sale complete!</div>
+          <div style={{ fontSize: 20, color: 'rgba(255,255,255,0.9)' }}>${saleFlash.total.toFixed(2)}</div>
+        </div>
+      )}
     </div>
   )
+}
+
+function paymentBtnStyle(active) {
+  return {
+    flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+    border: active ? `2px solid ${GREEN}` : '1px solid #d1d5db',
+    background: active ? '#ECFDF5' : 'white',
+    color: active ? GREEN : '#374151',
+  }
 }
 
 const stepperBtnStyle = {
