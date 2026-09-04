@@ -196,6 +196,51 @@ export default function Inventory({ products, onChange }) {
     onChange()
   }
 
+  // ── Remove / deactivate / reactivate ────────────────────────────────────
+  // "Remove" tries a real delete first. The database itself will refuse
+  // that if the product has ever been sold (sale_line_items references it),
+  // which is exactly the distinction we want:
+  //   • never sold (e.g. added by mistake)  -> delete succeeds, gone for good
+  //   • has sales history (no longer sold)  -> delete is blocked, so we just
+  //                                            deactivate it instead — hidden
+  //                                            from Register, past sales/receipts
+  //                                            stay accurate, can be brought back
+  const [removingId, setRemovingId] = useState(null)
+
+  async function removeProduct(product) {
+    if (!confirm(
+      `Remove "${product.name}"?\n\n` +
+      `If it's never been sold, it'll be deleted for good. If it has sales history, ` +
+      `it'll just be hidden from checkout instead (so past sales stay accurate) — ` +
+      `you can bring it back anytime.`
+    )) return
+
+    setRemovingId(product.id)
+    const { error: deleteErr } = await supabase.from('products').delete().eq('id', product.id)
+    if (deleteErr) {
+      await supabase.from('products').update({ active: false }).eq('id', product.id)
+    }
+    setRemovingId(null)
+    onChange()
+  }
+
+  async function reactivateProduct(product) {
+    await supabase.from('products').update({ active: true }).eq('id', product.id)
+    onChange()
+  }
+
+  async function deletePermanently(product) {
+    if (!confirm(`Permanently delete "${product.name}"? This can't be undone.`)) return
+    setRemovingId(product.id)
+    const { error } = await supabase.from('products').delete().eq('id', product.id)
+    setRemovingId(null)
+    if (error) {
+      alert(`Can't fully delete "${product.name}" — it has sales history attached. It'll stay hidden from checkout instead.`)
+      return
+    }
+    onChange()
+  }
+
   // ── Add product ─────────────────────────────────────────────────────────
   async function addProduct(e) {
     e.preventDefault()
@@ -261,7 +306,40 @@ export default function Inventory({ products, onChange }) {
       </form>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-        {(products || []).map(product => (
+        {(products || []).map(product => {
+          if (!product.active) {
+            return (
+              <div key={product.id} style={{
+                background: '#f9fafb', border: '1px dashed #d1d5db', borderRadius: 12, padding: 14, opacity: 0.8,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#6b7280' }}>{product.name}</div>
+                  <span style={{
+                    padding: '2px 7px', fontSize: 10, fontWeight: 700, borderRadius: 999,
+                    background: '#e5e7eb', color: '#6b7280', letterSpacing: '0.02em', whiteSpace: 'nowrap',
+                  }}>
+                    NOT FOR SALE
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 14 }}>
+                  ${Number(product.price).toFixed(2)} · was {product.stock} in stock
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => reactivateProduct(product)} style={smallBtnStyle(GREEN)}>
+                    ↺ Bring back
+                  </button>
+                  <button
+                    onClick={() => deletePermanently(product)}
+                    disabled={removingId === product.id}
+                    style={smallBtnStyle('#dc2626')}
+                  >
+                    {removingId === product.id ? '…' : '🗑 Delete for good'}
+                  </button>
+                </div>
+              </div>
+            )
+          }
+          return (
           <div key={product.id} style={{
             background: 'white', border: '1px solid #e5e7eb', borderRadius: 12, padding: 14,
           }}>
@@ -456,8 +534,23 @@ export default function Inventory({ products, onChange }) {
                 </button>
               )}
             </div>
+
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #f0f0f0', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => removeProduct(product)}
+                disabled={removingId === product.id}
+                style={{
+                  padding: '6px 10px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none',
+                  background: 'transparent', color: '#dc2626', cursor: removingId === product.id ? 'default' : 'pointer',
+                  opacity: removingId === product.id ? 0.6 : 1,
+                }}
+              >
+                {removingId === product.id ? 'Removing…' : '🗑 Remove from store'}
+              </button>
+            </div>
           </div>
-        ))}
+          )
+        })}
         {(!products || products.length === 0) && (
           <div style={{ color: '#9ca3af', fontSize: 14 }}>No products yet — add one above.</div>
         )}
